@@ -17,9 +17,16 @@ if [ "$debug" = "true" ]; then
   java_options="$java_options -XjdwpProvider:adbconnection -XjdwpOptions:suspend=n,server=y"
 fi
 
-# Mount an empty temporary file system over /data/resource-cache to avoid possible overlay conflicts.
+# Shadow /data/resource-cache with an empty directory of our own: initializing the framework assets
+# in a root app_process forks `idmap2 create-multiple`, which would otherwise write the immutable
+# framework idmaps of this boot into the cache every other process shares. Bind an empty directory
+# rather than a tmpfs: a bind mount reuses the superblock of /data, so it claims none of the
+# kernel-global anonymous device minors, whose gaps are visible from any process on the device.
 # Note that this script runs inside an isolated mount namespace (via unshare).
-mount tmpfs -t tmpfs /data/resource-cache
+emptyDir="$dir/.resource-cache"
+rm -rf "$emptyDir"
+mkdir -p "$emptyDir"
+mount -o bind "$emptyDir" /data/resource-cache
 
 # Wait for Zygote socket using a polling loop
 if [ ! -S "/dev/socket/zygote" ]; then
