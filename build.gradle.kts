@@ -47,7 +47,10 @@ abstract class GitLatestTagValueSource : ValueSource<String, ValueSourceParamete
     override fun obtain(): String {
         val output = ByteArrayOutputStream()
         val result = execOperations.exec {
-            commandLine("git", "tag", "--list", "--sort=-v:refname")
+            // Only v-prefixed tags are version names. CI's canary releases are tagged
+            // canary-<code>, and a fork starts with no tags but those, so an unfiltered
+            // listing once named a version "canary-3115".
+            commandLine("git", "tag", "--list", "v*", "--sort=-v:refname")
             standardOutput = output
             isIgnoreExitValue = true
         }
@@ -223,10 +226,10 @@ val injectedPackageUid = 2000
 val defaultManagerPackageName = "org.matrix.vector.manager"
 
 val androidTargetSdkVersion = 37
-val androidMinSdkVersion = 27
+val androidMinSdkVersion = 31
 val androidBuildToolsVersion = "37.0.0"
 val androidCompileSdkVersion = 37
-val androidCompileNdkVersion = "30.0.16248370"
+val androidCompileNdkVersion = "29.0.14206865"
 val androidSourceCompatibility = JavaVersion.VERSION_21
 val androidTargetCompatibility = JavaVersion.VERSION_21
 
@@ -271,7 +274,7 @@ subprojects {
 
             defaultConfig.apply {
                 minSdk = androidMinSdkVersion
-                ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")) }
+                ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a")) }
 
                 if (this is ApplicationDefaultConfig) {
                     targetSdk = androidTargetSdkVersion
@@ -284,18 +287,10 @@ subprojects {
                     listOf(
                         "-DVERSION_CODE=${versionCodeProvider.get()}",
                         "-DVERSION_NAME='\"${versionNameProvider.get()}\"'",
-                        // parallel_hashmap reaches for <emmintrin.h> whenever __SSE2__ is defined,
-                        // and that header's static inline intrinsics arrive twice on the x86 ABIs:
-                        // dex_builder.ixx and dex_helper.ixx each include phmap in their global
-                        // module fragment, so importing dex_builder gives clang two definitions
-                        // with the same mangled name. clang 21 (NDK r29) rejects that outright,
-                        // where clang 20 merged them. Turning phmap's SSE2 group scan off costs
-                        // nothing on arm, which never had it, and is set for every native module
-                        // rather than for dex_builder alone because phmap's layout depends on the
-                        // flag -- our own hook_bridge.cpp instantiates the same templates, and two
-                        // group sizes in one .so would be an ODR violation the linker cannot see.
+                        // phmap's layout depends on these defines: hook_bridge.cpp instantiates
+                        // the same templates as the dex builder, and two group sizes in one
+                        // binary would be an ODR violation the linker cannot see.
                         "-DPHMAP_HAVE_SSE2=0",
-                        // phmap refuses to configure with SSSE3 but no SSE2, so both go together.
                         "-DPHMAP_HAVE_SSSE3=0",
                     )
 
@@ -303,6 +298,20 @@ subprojects {
                     listOf(
                         "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
                         "-DVECTOR_ROOT=${rootDir.absolutePath}",
+                        // The native target keeps the API level it was written against; minSdk must
+                        // not move it. Raising minSdk to 31 moved ANDROID_PLATFORM with it, and the
+                        // NDK derives three ABI-level defaults from that level: thread-locals switch
+                        // from emutls to real ELF TLS (a PT_TLS segment appears), relative
+                        // relocations are packed into an Android RELR table, and the segment layout
+                        // gains a separate read-only PT_LOAD. All three are invisible to the linker
+                        // and land on the one artifact that cannot afford them - the library injected
+                        // into zygote and system_server, whose own ELF readers (dobby's GOT walking,
+                        // lsplt's per-segment scan, ElfImage's base discovery) assume the old
+                        // encoding, and ElfImage says outright that a wrong base shifts every hook
+                        // target and the write lands in whatever else is mapped there. Android 12 is
+                        // the floor the installer enforces and the manifests declare; the injected
+                        // binaries stay on 27 so they keep the ABI they were validated on.
+                        "-DANDROID_PLATFORM=android-27",
                         // Enforce 16 KB page size alignment for Android 15+ compatibility
                         "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384",
                         "-DCMAKE_EXE_LINKER_FLAGS=-Wl,-z,max-page-size=16384",

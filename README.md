@@ -1,8 +1,12 @@
 <div align="center">
 
-# Vector Framework
+# Vekta Framework
 
 **A high-performance ART hooking framework for modern Android**
+
+> **Vekta** is a rebranded fork of [Vector](https://github.com/JingMatrix/Vector) (by JingMatrix),
+> maintained by [Lxyao](https://github.com/Lxiaoyao077). The codebase follows upstream; the
+> releases, the manager, and the module ship under the Vekta name.
 
 [![Build](https://img.shields.io/github/actions/workflow/status/JingMatrix/Vector/core.yml?branch=master&event=push&logo=github&label=Build)](https://github.com/JingMatrix/Vector/actions/workflows/core.yml?query=event%3Apush+branch%3Amaster+is%3Acompleted)
 [![Crowdin](https://img.shields.io/badge/Localization-Crowdin-blueviolet?logo=Crowdin)](https://crowdin.com/project/lsposed_jingmatrix)
@@ -23,7 +27,7 @@ The framework allows modules to modify system and application behavior in-memory
 
 ### Compatibility
 
-Vector supports devices running **Android 8.1 through Android 17 Beta**.
+Vekta supports devices running **Android 12 through Android 17 Beta**.
 
 > [!TIP]
 > This framework requires a recent installation of Magisk or KernelSU with Zygisk enabled.
@@ -81,7 +85,7 @@ If you encounter issues or wish to help improve the project, please refer to the
 Vector supports both legacy and modern hooking standards to ensure broad module compatibility.
 
 *   [Legacy Xposed API](https://api.xposed.info/)
-*   [Modern libxposed API](https://github.com/JingMatrix/libxposed-api)
+*   [Modern libxposed API](https://libxposed.github.io/api/)
 *   [Xposed Module Repository](https://github.com/Xposed-Modules-Repo)
 
 > [!NOTE]
