@@ -55,8 +55,8 @@ object VectorService : IVectorDaemon.Stub() {
     // Initialize OS Observers using Coroutines for the dispatch blocks
     registerReceivers()
 
-    if (VectorDaemon.isLateInject) {
-      Log.i(TAG, "Late injection detected. Forcing boot completed event.")
+    if (VectorDaemon.startedAfterSystemServer) {
+      Log.i(TAG, "Started after system_server. Forcing boot completed event.")
       dispatchBootCompleted()
     }
   }

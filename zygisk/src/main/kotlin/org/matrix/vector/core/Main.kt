@@ -19,7 +19,9 @@ object Main {
      * Shared initialization logic for both System Server and Application processes.
      *
      * @param isSystem True if this is the system_server process.
-     * @param isLateInject True if Zygisk APIs are not invoked via hooks
+     * @param isLateInject True if Zygisk injected us into a system_server that was already
+     *   running, which is past the points the hooks would have caught, so the startup they drive
+     *   is run by hand instead.
      * @param niceName The process name (e.g., package name or "system").
      * @param appDir The application's data directory.
      * @param binder The Binder token associated with the application service.

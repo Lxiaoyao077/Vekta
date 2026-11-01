@@ -3,6 +3,7 @@ package org.matrix.vector.daemon.ipc
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.os.IClientCallback
 import android.os.IServiceCallback
 import android.os.Parcel
 import android.os.ServiceManager
@@ -27,7 +28,15 @@ private const val TAG = "VectorSystemServer"
  */
 private object ServiceRegistrationWatcher {
 
+  // Written from the main thread at startup and from a binder thread when system_server dies.
+  @Volatile private var watchedName: String? = null
+  @Volatile private var unusedName: String? = null
+
   fun watch(serviceName: String) {
+    // servicemanager keeps every callback it is handed, and a system_server restart brings the
+    // daemon back through here; without this a long-lived daemon stacks up duplicates that all
+    // report the same registration.
+    if (watchedName == serviceName) return
     val callback =
         object : IServiceCallback.Stub() {
           // The IServiceCallback will tell us when the real Android service is ready,
@@ -41,7 +50,39 @@ private object ServiceRegistrationWatcher {
           override fun asBinder(): IBinder = this
         }
     runCatching { getSystemServiceManager().registerForNotifications(serviceName, callback) }
+        .onSuccess { watchedName = serviceName }
         .onFailure { Log.e(TAG, "Failed to register IServiceCallback", it) }
+  }
+
+  /**
+   * Asks servicemanager to drop [serviceName] once nothing but itself is holding [binder].
+   *
+   * It will not drop a service on request alone. `tryUnregisterService` refuses outright while
+   * the service is marked as having a client on the way, which handing the binder out is what
+   * sets, and the only code that clears that mark returns early for any name without a client
+   * callback — so for a service registered the ordinary way the mark is permanent and the
+   * refusal is forever. Asking repeatedly changes nothing.
+   *
+   * Registering a callback is what puts the name on servicemanager's interval, which then clears
+   * the mark and, once the last client is gone, says so. Unregistering from inside that is how a
+   * lazy service shuts itself down, and it is the only sequence servicemanager accepts.
+   */
+  fun unregisterWhenUnused(serviceName: String, binder: IBinder) {
+    if (unusedName == serviceName) return
+    val callback =
+        object : IClientCallback.Stub() {
+          override fun onClients(registered: IBinder, hasClients: Boolean) {
+            if (hasClients) return
+            runCatching { getSystemServiceManager().tryUnregisterService(serviceName, registered) }
+                .onSuccess { Log.d(TAG, "Dropped the proxy service `$serviceName`") }
+                .onFailure { Log.d(TAG, "Proxy service `$serviceName` stays registered: $it") }
+          }
+
+          override fun asBinder(): IBinder = this
+        }
+    runCatching { getSystemServiceManager().registerClientCallback(serviceName, binder, callback) }
+        .onSuccess { unusedName = serviceName }
+        .onFailure { Log.d(TAG, "Proxy service `$serviceName` stays registered: $it") }
   }
 }
 
@@ -59,7 +100,9 @@ object SystemServerService : Binder(), IBinder.DeathRecipient {
   private var proxyServiceName: String? = null
   private var originService: IBinder? = null
 
-  var systemServerRequested = false
+  // Latched from a binder thread when system_server attaches, cleared from another when it dies,
+  // and read on the daemon's main thread.
+  @Volatile var systemServerRequested = false
 
   fun registerProxyService(serviceName: String) {
     // Register as the service name early to setup an IPC for `system_server`.
@@ -76,6 +119,20 @@ object SystemServerService : Binder(), IBinder.DeathRecipient {
           proxyServiceName = serviceName
         }
         .onFailure { Log.e(TAG, "Failed to register proxy service `$serviceName`", it) }
+  }
+
+  /**
+   * Arranges for our proxy to leave servicemanager once the module it was there for is done with
+   * it; see [ServiceRegistrationWatcher.unregisterWhenUnused] for why it cannot simply be asked.
+   *
+   * Worth arranging because the name invented for a late injection is ours alone, so unlike
+   * `serial` nothing will ever come along and replace it. Android R and later; older
+   * servicemanagers offer no way to take a name back, and there it stays registered.
+   */
+  fun unregisterProxyService() {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+    val name = proxyServiceName ?: return
+    ServiceRegistrationWatcher.unregisterWhenUnused(name, this)
   }
 
   /**
